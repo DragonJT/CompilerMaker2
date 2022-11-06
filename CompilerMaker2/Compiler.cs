@@ -1,58 +1,67 @@
 ﻿using System;
 namespace CompilerMaker2
 {
+    enum CompileStep { FunctionCreation, EmitAsm }
+
     class TokenReader
     {
+        public string code;
         public List<Token> tokens;
         public int index;
 
-        public TokenReader(List<Token> tokens)
+        public TokenReader(string code, List<Token> tokens)
         {
+            this.code = code;
             this.tokens = tokens;
             index = 0;
         }
 
         public bool OutOfRange => index >= tokens.Count;
+
         public Token Current => tokens[index];
     }
 
     interface ISyntax
     {
-        int Type { get; }
     }
 
     enum ErrorType { OutOfRange, ExpectingDifferentToken, WhileNotLongEnough, NoValidBranches }
 
     class SyntaxError : ISyntax
     {
-        public int Type => JEnum.Error;
+        string code;
+        int index;
         ErrorType errorType;
 
-        public SyntaxError(ErrorType errorType)
+        public SyntaxError(TokenReader reader, ErrorType errorType)
         {
+            code = reader.code;
+            if (reader.index >= reader.tokens.Count)
+                index = code.Length;
+            else
+                index = reader.tokens[reader.index].start;
             this.errorType = errorType;
         }
 
         public override string ToString()
         {
-            return errorType.ToString();
+            return errorType.ToString() + ": " + code.Substring(0, index) + "]" + code.Substring(index);
         }
     }
 
     class SyntaxTree : ISyntax
     {
-        public int Type { get; }
         public List<ISyntax> children;
+        public object? compilerData;
 
-        public SyntaxTree(int type, List<ISyntax> children)
+        public SyntaxTree(List<ISyntax> children)
         {
-            Type = type;
             this.children = children;
         }
 
         public override string ToString()
         {
-            var result = JEnum.GetName(Type) + "[";
+            var result = "[";
             for (var i = 0; i < children.Count; i++)
             {
                 result += children[i];
@@ -66,7 +75,6 @@ namespace CompilerMaker2
 
     class SyntaxOr : ISyntax
     {
-        public int Type => syntax.Type;
         public ISyntax syntax;
         public ICompile branch;
 
@@ -81,7 +89,7 @@ namespace CompilerMaker2
     {
         public abstract ISyntax Parse(TokenReader reader);
 
-        public abstract void Emit(Emitter emitter, ISyntax syntax);
+        public virtual void Emit(Emitter emitter, ISyntax syntax, CompileStep compileStep) { }
 
         public virtual ShuntingYardType GetShuntingYardType(ISyntax syntax) => ShuntingYardType.None;
 
@@ -102,31 +110,24 @@ namespace CompilerMaker2
         public override ISyntax Parse(TokenReader reader)
         {
             if (reader.OutOfRange)
-                return new SyntaxError(ErrorType.OutOfRange);
+                return new SyntaxError(reader, ErrorType.OutOfRange);
             var current = reader.Current;
             if (current.Type == type)
             {
                 reader.index++;
                 return current;
             }
-            return new SyntaxError(ErrorType.ExpectingDifferentToken);
-        }
-
-        public override void Emit(Emitter emitter, ISyntax syntax)
-        {
-            throw new Exception("Cant emit CmToken");
+            return new SyntaxError(reader, ErrorType.ExpectingDifferentToken);
         }
     }
 
-    class CmWhile : ICompile
+    abstract class CmWhile : ICompile
     {
-        int type;
         protected ICompile element;
         int minLength;
 
-        public CmWhile(string type, ICompile element, int minLength)
+        public CmWhile(ICompile element, int minLength)
         {
-            this.type = JEnum.Get(type);
             this.element = element;
             this.minLength = minLength;
         }
@@ -137,22 +138,48 @@ namespace CompilerMaker2
             while (true)
             {
                 var p = element.Parse(reader);
-                if (p.Type == JEnum.Error)
+                if (p is SyntaxError)
                 {
                     if (children.Count < minLength)
-                        return new SyntaxError(ErrorType.WhileNotLongEnough);
-                    return new SyntaxTree(type, children);
+                        return new SyntaxError(reader, ErrorType.WhileNotLongEnough);
+                    return new SyntaxTree(children);
                 }
                 children.Add(p);
             }
         }
+    }
 
-        public override void Emit(Emitter emitter, ISyntax syntax)
+    class CmWhileWithDeliminator : ICompile
+    {
+        protected ICompile element;
+        ICompile deliminator;
+        bool strict;
+
+        public CmWhileWithDeliminator(ICompile element, ICompile deliminator, bool strict)
         {
-            var tree = (SyntaxTree)syntax;
-            foreach(var c in tree.children)
+            this.element = element;
+            this.deliminator = deliminator;
+            this.strict = strict;
+        }
+
+        public override ISyntax Parse(TokenReader reader)
+        {
+            var length = 0;
+            List<ISyntax> children = new();
+            while (true)
             {
-                element.Emit(emitter, c);
+                var p = element.Parse(reader);
+                if (p is SyntaxError)
+                {
+                    if (length == 0 || !strict)
+                        return new SyntaxTree(children);
+                    return p;
+                }
+                children.Add(p);
+                var dp = deliminator.Parse(reader);
+                if (dp is SyntaxError)
+                    return new SyntaxTree(children);
+                length++;
             }
         }
     }
@@ -171,10 +198,10 @@ namespace CompilerMaker2
             foreach(var b in branches)
             {
                 var p = b.Parse(reader);
-                if (p.Type != JEnum.Error)
+                if (!(p is SyntaxError))
                     return new SyntaxOr(p, b);
             }
-            return new SyntaxError(ErrorType.NoValidBranches);
+            return new SyntaxError(reader, ErrorType.NoValidBranches);
         }
 
         public override ShuntingYardType GetShuntingYardType(ISyntax syntax)
@@ -195,10 +222,10 @@ namespace CompilerMaker2
             return syntaxOr.branch.GetAssociative(syntaxOr.syntax);
         }
 
-        public override void Emit(Emitter emitter, ISyntax syntax)
+        public override void Emit(Emitter emitter, ISyntax syntax, CompileStep compileStep)
         {
             var syntaxOr = ((SyntaxOr)syntax);
-            syntaxOr.branch.Emit(emitter, syntaxOr.syntax);
+            syntaxOr.branch.Emit(emitter, syntaxOr.syntax, compileStep);
         }
     }
 
@@ -218,23 +245,23 @@ namespace CompilerMaker2
             for(int i=0;i<id;i++)
             {
                 var p = fields[i].Parse(reader);
-                if (p.Type == JEnum.Error)
+                if (p is SyntaxError)
                     return p;
             }
             var value = fields[id].Parse(reader);
-            if (value.Type == JEnum.Error)
+            if (value is SyntaxError)
                 return value;
 
             for (int i = id+1; i < fields.Length; i++)
             {
                 var p = fields[i].Parse(reader);
-                if (p.Type == JEnum.Error)
+                if (p is SyntaxError)
                     return p;
             }
             return value!;
         }
 
-        public override void Emit(Emitter emitter, ISyntax syntax) => fields[id].Emit(emitter, syntax);
+        public override void Emit(Emitter emitter, ISyntax syntax, CompileStep compileStep) => fields[id].Emit(emitter, syntax, compileStep);
 
         public override Associative GetAssociative(ISyntax syntax) => fields[id].GetAssociative(syntax);
 
@@ -243,14 +270,12 @@ namespace CompilerMaker2
         public override ShuntingYardType GetShuntingYardType(ISyntax syntax) => fields[id].GetShuntingYardType(syntax);
     }
 
-    abstract class CmObject:ICompile
+    class CmObject:ICompile
     {
-        int type;
         protected ICompile[] fields;
 
-        public CmObject(string type, params ICompile[] fields)
+        public CmObject(params ICompile[] fields)
         {
-            this.type = JEnum.Get(type);
             this.fields = fields;
         }
 
@@ -260,11 +285,11 @@ namespace CompilerMaker2
             foreach(var f in fields)
             {
                 var p = f.Parse(reader);
-                if (p.Type == JEnum.Error)
+                if (p is SyntaxError)
                     return p;
                 children.Add(p);
             }
-            return new SyntaxTree(type, children);
+            return new SyntaxTree(children);
         }
     }
 
@@ -274,7 +299,7 @@ namespace CompilerMaker2
 
         public override ISyntax Parse(TokenReader reader) => compiler!.Parse(reader);
 
-        public override void Emit(Emitter emitter, ISyntax syntax) => compiler!.Emit(emitter, syntax);
+        public override void Emit(Emitter emitter, ISyntax syntax, CompileStep compileStep) => compiler!.Emit(emitter, syntax, compileStep);
 
         public override Associative GetAssociative(ISyntax syntax) => compiler!.GetAssociative(syntax);
 

@@ -4,13 +4,6 @@ namespace CompilerMaker2
     static class JEnum
     {
         static Dictionary<string, int> enums = new();
-        public static readonly int Error;
-        public static readonly int Or;
-
-        static JEnum()
-        {
-            Error = Get("Error");
-        }
 
         public static int Get(string @enum)
         {
