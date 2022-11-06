@@ -18,25 +18,22 @@ namespace CompilerMaker2
             tokenizer.Add("ws", ws, false);
             var tokens = tokenizer.Tokenize(code);
 
-            var expression = new CmCirular();
-            var integer = new CmConstF32("int");
-            var add = new CmBinaryOp("+", Opcode.f32_add, 0, Associative.Left);
-            var subtract = new CmBinaryOp("-", Opcode.f32_sub, 0, Associative.Left);
-            var multiply = new CmBinaryOp("*", Opcode.f32_mul, 5, Associative.Left);
-            var divide = new CmBinaryOp("/", Opcode.f32_div, 5, Associative.Left);
-            var args = new CmDecoratedValue(1, new CmToken("("), new CmArgs(expression, new CmToken(","), true), new CmToken(")"));
-            var call = new CmCall(0, 1, new CmToken("identifier"), args);
-            var parenthesisGroup = new CmDecoratedValue(1, new CmToken("("), expression, new CmToken(")"));
-            var expressionOr = new CmOr(call, parenthesisGroup, integer, add, subtract, divide, multiply);
-            expression.compiler = new CmExpression(expressionOr, 1);
-            var expressionStatement = new CmDecoratedValue(0, expression, new CmToken(";"));
-            var statements = new CmStatements(expressionStatement);
+            var expression = new PsCircular();
+            var identifier = new PsToken("identifier");
+            var args = new PsDecoratedValue(1, new PsToken("("), new PsWhileWithDeliminator("Args", expression, new PsToken(","), true), new PsToken(")"));
+            var call = new PsObject("Call", identifier, args);
+            var parenthesisGroup = new PsDecoratedValue(1, new PsToken("("), expression, new PsToken(")"));
+            var expressionOr = new PsOr(call, parenthesisGroup,
+                new PsToken("int"), new PsToken("+"), new PsToken("-"), new PsToken("/"), new PsToken("*"));
+            expression.compiler = new PsWhile("Expression", expressionOr, 1);
+            var expressionStatement = new PsDecoratedValue(0, expression, new PsToken(";"));
+            var statements = new PsWhile("Statements", expressionStatement, 0);
 
-            var block = new CmDecoratedValue(1, new CmToken("{"), statements, new CmToken("}"));
-            var parameter = new CmObject(new CmToken("identifier"), new CmToken("identifier"));
-            var parameters = new CmDecoratedValue(1, new CmToken("("), new CmWhileWithDeliminator(parameter, new CmToken(","), true), new CmToken(")"));
-            var function = new CmFunction(0,1,2,3, new CmToken("identifier"), new CmToken("identifier"), parameters, block);
-            var functions = new CmFunctions(function);
+            var block = new PsDecoratedValue(1, new PsToken("{"), statements, new PsToken("}"));
+            var parameter = new PsObject("Parameter", identifier, identifier);
+            var parameters = new PsDecoratedValue(1, new PsToken("("), new PsWhileWithDeliminator("Parameters", parameter, new PsToken(","), true), new PsToken(")"));
+            var function = new PsObject("Function", identifier, identifier, parameters, block);
+            var functions = new PsWhile("Functions", function, 0);
             var compileUnit = functions;
 
             var p = compileUnit.Parse(new TokenReader(code, tokens));
@@ -44,9 +41,23 @@ namespace CompilerMaker2
             {
                 return error.ToString();
             }
-            var emitter = new Emitter();
-            compileUnit.Emit(emitter, p, CompileStep.FunctionCreation);
-            compileUnit.Emit(emitter, p, CompileStep.EmitAsm);
+            var emitter = new Emitter(p);
+            emitter.Add("Expression", new EmitShuntingYard());
+            emitter.Add("int", new EmitConstF32());
+            emitter.Add("+", new EmitBinaryOp(0, Associative.Left, Opcode.f32_add));
+            emitter.Add("-", new EmitBinaryOp(0, Associative.Left, Opcode.f32_sub));
+            emitter.Add("*", new EmitBinaryOp(5, Associative.Left, Opcode.f32_mul));
+            emitter.Add("/", new EmitBinaryOp(5, Associative.Left, Opcode.f32_div));
+            emitter.Add("Args", new EmitChildren());
+            emitter.Add("Call", new EmitCall(0,1));
+            emitter.Add("Statements", new EmitChildren());
+            emitter.Add("Parameter", new EmitParameter(0, 1));
+            emitter.Add("Parameters", new EmitParameters());
+            emitter.Add("Function", new EmitFunction(0, 1, 2, 3));
+            emitter.Add("Functions", new EmitChildren());
+            emitter.CalcData("Parameter");
+            emitter.CalcData("Parameters");
+            emitter.CalcData("Function");
             return emitter.Emit();
         }
 
@@ -64,15 +75,15 @@ namespace CompilerMaker2
         {
             var code = @"
 float GetValue(){
-    23;
+    12*4;
 }
 
 void Main(){
-    Print( 4 * (4+3/2+13) );
-    Print( 25 );
-    Print( 23 + 25*2 - 33/4*5 + 12 );
-    Print( GetValue() );
+    Print(53 + 4 * 6 * (5 - 2));
+    Print(64-23*2);
+    Print(GetValue());
 }";
+
             var html = @"<!DOCTYPE html>
 <html>
 <body>

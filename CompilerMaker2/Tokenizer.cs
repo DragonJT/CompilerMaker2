@@ -4,7 +4,8 @@ namespace CompilerMaker2
     static class JEnum
     {
         static Dictionary<string, int> enums = new();
-
+        public static readonly int Error = Get("Error");
+        
         public static int Get(string @enum)
         {
             if (enums.TryGetValue(@enum, out int value))
@@ -23,6 +24,8 @@ namespace CompilerMaker2
             }
             throw new Exception("JEnum: Cannot find id");
         }
+
+        public static int Count => enums.Count;
     }
 
     class CodeReader
