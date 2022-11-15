@@ -21,24 +21,23 @@ namespace CompilerMaker2
         public Token Current => tokens[index];
     }
 
-    interface ISyntax
+    abstract class ISyntax
     {
-        int Type { get; }
-        string ToString();
+        public int type;
+        public abstract override string ToString();
     }
 
     enum ErrorType { OutOfRange, ExpectingDifferentToken, WhileNotLongEnough, NoValidBranches }
 
     class SyntaxError : ISyntax
     {
-        public int Type { get; }
         string code;
         int index;
         ErrorType errorType;
 
         public SyntaxError(TokenReader reader, ErrorType errorType)
         {
-            Type = JEnum.Error;
+            type = JEnum.Error;
             code = reader.code;
             if (reader.index >= reader.tokens.Count)
                 index = code.Length;
@@ -53,21 +52,44 @@ namespace CompilerMaker2
         }
     }
 
-    class SyntaxTree : ISyntax
+    class SyntaxToken : ISyntax
     {
-        public int Type { get; }
-        public List<ISyntax> children;
-        public object? data;
+        public string value;
+        public int start;
+        public int end;
 
-        public SyntaxTree(int type, List<ISyntax> children)
+        public SyntaxToken(int type, string value, int start, int end)
         {
-            Type = type;
-            this.children = children;
+            base.type = type;
+            this.value = value;
+            this.start = start;
+            this.end = end;
         }
 
         public override string ToString()
         {
-            var result = JEnum.GetName(Type)+"[";
+            return value;
+        }
+    }
+
+    class SyntaxTree : ISyntax
+    {
+        public List<ISyntax> children;
+
+        public SyntaxTree(int type, List<ISyntax> children)
+        {
+            base.type = type;
+            this.children = children;
+        }
+
+        public ISyntax Get(string type)
+        {
+            return children.First(c => c.type == JEnum.Get(type));
+        }
+
+        public override string ToString()
+        {
+            var result = JEnum.GetName(type)+"[";
             for (var i = 0; i < children.Count; i++)
             {
                 result += children[i];
@@ -86,11 +108,19 @@ namespace CompilerMaker2
 
     class PsToken : IParse
     {
+        int newType;
         int type;
 
         public PsToken(string type)
         {
             this.type = JEnum.Get(type);
+            newType = this.type;
+        }
+
+        public PsToken(string newType, string type)
+        {
+            this.type = JEnum.Get(type);
+            this.newType = JEnum.Get(newType);
         }
 
         public ISyntax Parse(TokenReader reader)
@@ -101,7 +131,7 @@ namespace CompilerMaker2
             if (current.Type == type)
             {
                 reader.index++;
-                return current;
+                return new SyntaxToken(newType, current.value, current.start, current.end);
             }
             return new SyntaxError(reader, ErrorType.ExpectingDifferentToken);
         }
@@ -126,7 +156,7 @@ namespace CompilerMaker2
             while (true)
             {
                 var p = element.Parse(reader);
-                if (p.Type == JEnum.Error)
+                if (p.type == JEnum.Error)
                 {
                     if (children.Count < minLength)
                         return new SyntaxError(reader, ErrorType.WhileNotLongEnough);
@@ -159,7 +189,7 @@ namespace CompilerMaker2
             while (true)
             {
                 var p = element.Parse(reader);
-                if (p.Type == JEnum.Error)
+                if (p.type == JEnum.Error)
                 {
                     if (length == 0 || !strict)
                         return new SyntaxTree(type, children);
@@ -167,7 +197,7 @@ namespace CompilerMaker2
                 }
                 children.Add(p);
                 var dp = deliminator.Parse(reader);
-                if (dp.Type == JEnum.Error)
+                if (dp.type == JEnum.Error)
                     return new SyntaxTree(type, children);
                 length++;
             }
@@ -188,7 +218,7 @@ namespace CompilerMaker2
             foreach(var b in branches)
             {
                 var p = b.Parse(reader);
-                if (p.Type != JEnum.Error)
+                if (p.type != JEnum.Error)
                     return p;
             }
             return new SyntaxError(reader, ErrorType.NoValidBranches);
@@ -211,17 +241,17 @@ namespace CompilerMaker2
             for(int i=0;i<id;i++)
             {
                 var p = fields[i].Parse(reader);
-                if (p.Type == JEnum.Error)
+                if (p.type == JEnum.Error)
                     return p;
             }
             var value = fields[id].Parse(reader);
-            if (value.Type == JEnum.Error)
+            if (value.type == JEnum.Error)
                 return value;
 
             for (int i = id+1; i < fields.Length; i++)
             {
                 var p = fields[i].Parse(reader);
-                if (p.Type == JEnum.Error)
+                if (p.type == JEnum.Error)
                     return p;
             }
             return value!;
@@ -245,7 +275,7 @@ namespace CompilerMaker2
             foreach(var f in fields)
             {
                 var p = f.Parse(reader);
-                if (p.Type == JEnum.Error)
+                if (p.type == JEnum.Error)
                     return p;
                 children.Add(p);
             }
@@ -255,9 +285,9 @@ namespace CompilerMaker2
 
     class PsCircular : IParse
     {
-        public IParse? compiler;
+        public IParse compiler;
 
-        public ISyntax Parse(TokenReader reader) => compiler!.Parse(reader);
+        public ISyntax Parse(TokenReader reader) => compiler.Parse(reader);
     }
 }
 

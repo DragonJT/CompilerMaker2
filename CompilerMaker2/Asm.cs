@@ -263,11 +263,12 @@ namespace CompilerMaker2
 
     class AsmCall:IInstruction
     {
-        IFunction function;
+        public string name;
+        public IFunction function;
 
-        public AsmCall(IFunction function)
+        public AsmCall(string name)
         {
-            this.function = function;
+            this.name = name;
         }
 
         public void Emit(WASMWriter wasm)
@@ -285,7 +286,6 @@ namespace CompilerMaker2
         {
             this.value = value;
         }
-
 
         public void Emit(WASMWriter wasm)
         {
@@ -358,17 +358,13 @@ namespace CompilerMaker2
     class AsmFunction: IFunction
     {
         public bool export;
-        public List<IInstruction> instructions = new();
+        public List<IInstruction> instructions;
 
-        public AsmFunction(bool export, Valtype? returnType, string name, AsmParameter[] parameters)
+        public AsmFunction(bool export, Valtype? returnType, string name, AsmParameter[] parameters, List<IInstruction> instructions)
             :base(returnType, name, parameters)
         {
             this.export = export;
-        }
-
-        public void Add(IInstruction instruction)
-        {
-            instructions.Add(instruction);
+            this.instructions = instructions;
         }
 
         public void Emit(WASMWriter wasm)
@@ -386,18 +382,9 @@ namespace CompilerMaker2
     {
         List<IFunction> functions = new();
 
-        public AsmImportFunction ImportFunction(Valtype? returnType, string name, AsmParameter[] parameters, string body)
+        public void Add(IFunction function)
         {
-            var importFunction = new AsmImportFunction(returnType, name, parameters, body);
-            functions.Add(importFunction);
-            return importFunction;
-        }
-
-        public AsmFunction Function(bool export, Valtype? returnType, string name, AsmParameter[] parameters)
-        {
-            var function = new AsmFunction(export, returnType, name, parameters);
             functions.Add(function);
-            return function;
         }
 
         public IFunction FindFunction(string name)
@@ -488,6 +475,11 @@ namespace CompilerMaker2
                 }
             }
             wasm.Section(Section.export, exportVector);
+
+            foreach(var c in functions.SelectMany(f => f.instructions).OfType<AsmCall>())
+            {
+                c.function = FindFunction(c.name);
+            }
 
             var functionVector = new WASMVector();
             foreach (var f in functions)

@@ -19,20 +19,19 @@ namespace CompilerMaker2
             var tokens = tokenizer.Tokenize(code);
 
             var expression = new PsCircular();
-            var identifier = new PsToken("identifier");
             var args = new PsDecoratedValue(1, new PsToken("("), new PsWhileWithDeliminator("Args", expression, new PsToken(","), true), new PsToken(")"));
-            var call = new PsObject("Call", identifier, args);
+            var call = new PsObject("Call", new PsToken("Name", "identifier"), args);
             var parenthesisGroup = new PsDecoratedValue(1, new PsToken("("), expression, new PsToken(")"));
             var expressionOr = new PsOr(call, parenthesisGroup,
                 new PsToken("int"), new PsToken("+"), new PsToken("-"), new PsToken("/"), new PsToken("*"));
             expression.compiler = new PsWhile("Expression", expressionOr, 1);
             var expressionStatement = new PsDecoratedValue(0, expression, new PsToken(";"));
-            var statements = new PsWhile("Statements", expressionStatement, 0);
+            var instructions = new PsWhile("Instructions", expressionStatement, 0);
 
-            var block = new PsDecoratedValue(1, new PsToken("{"), statements, new PsToken("}"));
-            var parameter = new PsObject("Parameter", identifier, identifier);
+            var block = new PsDecoratedValue(1, new PsToken("{"), instructions, new PsToken("}"));
+            var parameter = new PsObject("Parameter", new PsToken("Type", "identifier"), new PsToken("Name", "identifier"));
             var parameters = new PsDecoratedValue(1, new PsToken("("), new PsWhileWithDeliminator("Parameters", parameter, new PsToken(","), true), new PsToken(")"));
-            var function = new PsObject("Function", identifier, identifier, parameters, block);
+            var function = new PsObject("Function", new PsToken("ReturnType", "identifier"), new PsToken("Name", "identifier"), parameters, block);
             var functions = new PsWhile("Functions", function, 0);
             var compileUnit = functions;
 
@@ -41,24 +40,31 @@ namespace CompilerMaker2
             {
                 return error.ToString();
             }
-            var emitter = new Emitter(p);
-            emitter.Add("Expression", new EmitShuntingYard());
-            emitter.Add("int", new EmitConstF32());
-            emitter.Add("+", new EmitBinaryOp(0, Associative.Left, Opcode.f32_add));
-            emitter.Add("-", new EmitBinaryOp(0, Associative.Left, Opcode.f32_sub));
-            emitter.Add("*", new EmitBinaryOp(5, Associative.Left, Opcode.f32_mul));
-            emitter.Add("/", new EmitBinaryOp(5, Associative.Left, Opcode.f32_div));
-            emitter.Add("Args", new EmitChildren());
-            emitter.Add("Call", new EmitCall(0,1));
-            emitter.Add("Statements", new EmitChildren());
-            emitter.Add("Parameter", new EmitParameter(0, 1));
-            emitter.Add("Parameters", new EmitParameters());
-            emitter.Add("Function", new EmitFunction(0, 1, 2, 3));
-            emitter.Add("Functions", new EmitChildren());
-            emitter.CalcData("Parameter");
-            emitter.CalcData("Parameters");
-            emitter.CalcData("Function");
-            return emitter.Emit();
+            var shuntingYard = new ShuntingYard();
+            shuntingYard.Add("+", new BinaryOp(Associative.Left, 0));
+            shuntingYard.Add("-", new BinaryOp(Associative.Left, 0));
+            shuntingYard.Add("*", new BinaryOp(Associative.Left, 5));
+            shuntingYard.Add("/", new BinaryOp(Associative.Left, 5));
+            shuntingYard.AddExpression("Expression");
+            var tree = shuntingYard.Transform(p);
+
+            var asmEmitter = new AsmEmitter();
+            asmEmitter.Add("int", AsmEmitters.ConstFloat);
+            asmEmitter.Add("+", AsmEmitters.F32Add);
+            asmEmitter.Add("-", AsmEmitters.F32Subtract);
+            asmEmitter.Add("/", AsmEmitters.F32Divide);
+            asmEmitter.Add("*", AsmEmitters.F32Multiply);
+            asmEmitter.Add("Instructions", AsmEmitters.Instructions);
+            asmEmitter.Add("Args", AsmEmitters.Args);
+            asmEmitter.Add("Call", AsmEmitters.Call);
+            asmEmitter.Add("Parameter", AsmEmitters.Parameter);
+            asmEmitter.Add("Parameters", AsmEmitters.Parameters);
+            asmEmitter.Add("ReturnType", AsmEmitters.ReturnType);
+            asmEmitter.Add("Function", AsmEmitters.Function);
+            asmEmitter.Add("Functions", AsmEmitters.Functions);
+
+            var asm = (Asm)asmEmitter.Emit(tree);
+            return asm.Emit();
         }
 
         static void OpenWebBrowser(string filename)
@@ -74,14 +80,9 @@ namespace CompilerMaker2
         static void Main()
         {
             var code = @"
-float GetValue(){
-    12*4;
-}
-
 void Main(){
-    Print(53 + 4 * 6 * (5 - 2));
-    Print(64-23*2);
-    Print(GetValue());
+    Print( 6*(2+1) );
+    Print( 5+5*4*(2+1) );
 }";
 
             var html = @"<!DOCTYPE html>

@@ -43,7 +43,7 @@ namespace CompilerMaker2
         public bool OutOfRange => index >= code.Length;
     }
 
-    class Token:ISyntax
+    class Token
     {
         public int Type { get; }
         public string value;
